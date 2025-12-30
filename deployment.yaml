@@ -13,10 +13,11 @@ spec:
         app: nginx
         environment: development
         type: webserver
+        tier: backend
     spec:
       containers:
       - name: nginx-container
-        image: nginx:latest
+        image: nginx:1.23.0
         ports:
         - containerPort: 80
   replicas: 3
