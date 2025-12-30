@@ -18,3 +18,6 @@ kubectl annotate deploy/nginx-deploy \
 
 # Rollback deployment
 kubectl rollout undo deploy nginx-deploy --to-revision=1
+
+# Default DNS resolver on pod
+cat /etc/resolv.conf
