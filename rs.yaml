@@ -13,6 +13,7 @@ spec:
         app: nginx
         environment: development
         type: webserver
+        tier: backend
     spec:
       containers:
       - name: nginx-container
@@ -25,3 +26,4 @@ spec:
       app: nginx
       environment: development
       type: webserver
+      tier: backend

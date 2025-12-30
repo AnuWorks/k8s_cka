@@ -26,3 +26,4 @@ spec:
       app: nginx
       environment: development
       type: webserver
+      tier: backend
