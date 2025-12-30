@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-deploy
+  labels:
+    app: nginx
+    environment: development
+    type: webserver
+spec:
+  template:
+    metadata:
+      labels:
+        app: nginx
+        environment: development
+        type: webserver
+        tier: backend
+    spec:
+      containers:
+      - name: nginx-container
+        image: nginx:1.23.4-alpine
+        ports:
+        - containerPort: 80
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+      environment: development
+      type: webserver
+      tier: backend
