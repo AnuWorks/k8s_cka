@@ -1,0 +1,88 @@
+k get nodes
+NAME                          STATUS   ROLES           AGE   VERSION
+cka-cluster-1-control-plane   Ready    control-plane   23h   v1.35.0
+cka-cluster-1-worker          Ready    <none>          23h   v1.35.0
+cka-cluster-1-worker2         Ready    <none>          23h   v1.35.0
+➜  ~ k taint nodes cka-cluster-1-worker key1=value1:NoSchedule
+node/cka-cluster-1-worker tainted
+➜  ~ k get nodes -o wide
+NAME                          STATUS   ROLES           AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION     CONTAINER-RUNTIME
+cka-cluster-1-control-plane   Ready    control-plane   23h   v1.35.0   172.18.0.2    <none>        Debian GNU/Linux 12 (bookworm)   6.12.54-linuxkit   containerd://2.2.0
+cka-cluster-1-worker          Ready    <none>          23h   v1.35.0   172.18.0.4    <none>        Debian GNU/Linux 12 (bookworm)   6.12.54-linuxkit   containerd://2.2.0
+cka-cluster-1-worker2         Ready    <none>          23h   v1.35.0   172.18.0.3    <none>        Debian GNU/Linux 12 (bookworm)   6.12.54-linuxkit   containerd://2.2.0
+➜  ~ k run nginx --image=nginx --port=80 tolerations=key1=value1:NoSchedule
+pod/nginx created
+➜  ~ k get po
+NAME    READY   STATUS   RESTARTS     AGE
+nginx   0/1     Error    1 (3s ago)   5s
+➜  ~ k describe po nginx
+Name:             nginx
+Namespace:        dev
+Priority:         0
+Service Account:  default
+Node:             cka-cluster-1-worker2/172.18.0.3
+Start Time:       Sat, 03 Jan 2026 19:02:19 +0000
+Labels:           run=nginx
+Annotations:      <none>
+Status:           Running
+IP:               10.244.2.8
+IPs:
+  IP:  10.244.2.8
+Containers:
+  nginx:
+    Container ID:  containerd://3c7794d08b86b3c0032703378b6014f18bd0760017abb9993965a7a7eabe80be
+    Image:         nginx
+    Image ID:      docker.io/library/nginx@sha256:ca871a86d45a3ec6864dc45f014b11fe626145569ef0e74deaffc95a3b15b430
+    Port:          80/TCP
+    Host Port:     0/TCP
+    Args:
+      tolerations=key1=value1:NoSchedule
+    State:          Waiting
+      Reason:       CrashLoopBackOff
+    Last State:     Terminated
+      Reason:       Error
+      Exit Code:    127
+      Started:      Sat, 03 Jan 2026 19:02:22 +0000
+      Finished:     Sat, 03 Jan 2026 19:02:22 +0000
+    Ready:          False
+    Restart Count:  1
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-jhdpp (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True
+  Initialized                 True
+  Ready                       False
+  ContainersReady             False
+  PodScheduled                True
+Volumes:
+  kube-api-access-jhdpp:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason     Age              From               Message
+  ----     ------     ----             ----               -------
+  Normal   Scheduled  8s               default-scheduler  Successfully assigned dev/nginx to cka-cluster-1-worker2
+  Normal   Pulling    7s (x2 over 9s)  kubelet            spec.containers{nginx}: Pulling image "nginx"
+  Normal   Pulled     7s               kubelet            spec.containers{nginx}: Successfully pulled image "nginx" in 1.316s (1.316s including waiting). Image size: 58284928 bytes.
+  Normal   Created    6s (x2 over 7s)  kubelet            spec.containers{nginx}: Container created
+  Normal   Started    6s (x2 over 7s)  kubelet            spec.containers{nginx}: Container started
+  Normal   Pulled     6s               kubelet            spec.containers{nginx}: Successfully pulled image "nginx" in 993ms (993ms including waiting). Image size: 58284928 bytes.
+  Warning  BackOff    4s (x2 over 5s)  kubelet            spec.containers{nginx}: Back-off restarting failed container nginx in pod nginx_dev(b8bb059f-7220-4ba4-a7d9-fec2761f0743)
+➜  ~ k get po
+NAME    READY   STATUS   RESTARTS      AGE
+nginx   0/1     Error    2 (23s ago)   26s
+➜  ~ k get po -o wide
+NAME    READY   STATUS   RESTARTS      AGE   IP           NODE                    NOMINATED NODE   READINESS GATES
+nginx   0/1     Error    2 (27s ago)   30s   10.244.2.8   cka-cluster-1-worker2   <none>           <none>
+➜  ~ k get po -o wide
+NAME    READY   STATUS   RESTARTS      AGE   IP           NODE                    NOMINATED NODE   READINESS GATES
+nginx   0/1     Error    3 (26s ago)   42s   10.244.2.8   cka-cluster-1-worker2   <none>           <none>
