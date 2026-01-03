@@ -136,6 +136,54 @@
 - **test**: Testing environment with moderate resources
 - **prod**: Production environment with high availability and resources
 
+## Namespaces, Nodes, and Pods Relationship:
+
+### Relationship Hierarchy
+```
+Cluster
+├── Nodes (Physical/Virtual machines)
+│   ├── Worker Node 1
+│   ├── Worker Node 2
+│   └── Control Plane Node
+│
+└── Namespaces (Logical partitions)
+    ├── default
+    ├── kube-system  
+    ├── dev
+    ├── test
+    └── prod
+        └── Pods (Running containers)
+            ├── nginx-pod
+            └── postgres-pod
+```
+
+### Key Relationships:
+
+**Nodes ↔ Pods**: 
+- Pods are **scheduled** on Nodes
+- One Pod runs on exactly one Node
+- One Node can run multiple Pods
+- Scheduler decides which Node gets which Pod
+
+**Namespaces ↔ Pods**:
+- Pods exist **within** a Namespace
+- Namespaces provide logical isolation
+- Pods in different namespaces are isolated by default
+
+**Nodes ↔ Namespaces**:
+- **No direct relationship**
+- Nodes are cluster-wide resources
+- Namespaces are logical constructs
+- Pods from any namespace can be scheduled on any node (unless constrained)
+
+### Example Flow:
+```
+1. Create Pod in "dev" namespace
+2. Scheduler finds available Node (worker-1 or worker-2)  
+3. Pod runs on that Node but belongs to "dev" namespace
+4. Pod gets IP from Node's network but isolated by namespace
+```
+
 ### Application Architecture:
 
 #### Web Tier (nginx):
@@ -201,4 +249,9 @@ kubectl expose deployment postgres --type=ClusterIP --port=5432 -n dev
 # Create ConfigMaps and Secrets
 kubectl create configmap app-config --from-file=nginx.conf -n dev
 kubectl create secret generic db-password --from-literal=password=<password> -n dev
+
+# See relationships between Nodes, Namespaces, and Pods
+kubectl get pods -o wide -n dev                    # See which node each pod is on
+kubectl get pods --all-namespaces -o wide         # See all pods across namespaces and nodes
+kubectl describe node worker-node-1                # See what's running on specific node
 ```
