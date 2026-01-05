@@ -28,3 +28,13 @@ kubectl rollout undo deploy nginx-deploy --to-revision=1
 
 ## Default DNS resolver on pod
 cat /etc/resolv.conf
+
+## Scaling commands
+### use against files with name scaling
+kubectl autoscale deployment php-apache --cpu=50 --min=1 --max=10
+
+kubectl run -i --tty load-generator --rm --image=busybox:1.28 --restart=Never -- /bin/sh -c "while sleep 0.01; do wget -q -O- http://php-apache; done"
+
+kubectl get hpa php-apache --watch
+
+kubectl autoscale deployment php-apache --cpu=50 --min=1 --max=10
