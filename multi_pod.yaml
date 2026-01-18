@@ -11,14 +11,35 @@ spec:
   - name: myapp-container
     image: busybox:1.28
     command: ['sh', '-c', 'echo Hello from myapp-container! && sleep 3600']
+    resources:
+      requests:
+        memory: "16Mi"
+        cpu: "25m"
+      limits:
+        memory: "32Mi"
+        cpu: "50m"
     env:
     - name: FIRST_NAME
       value: "John"
   - name: sidecar-container
     image: busybox:1.28
     command: ['sh', '-c', 'echo Hello from sidecar-container! && sleep 3600']
+    resources:
+      requests:
+        memory: "16Mi"
+        cpu: "25m"
+      limits:
+        memory: "32Mi"
+        cpu: "50m"
   initContainers:
   - name: myapp-init
     image: busybox:1.28
     command: ['sh', '-c']
     args: ['until nslookup myservice.dev.svc.cluster.local; do echo waiting for myservice; sleep 2; done;']
+    resources:
+      requests:
+        memory: "16Mi"
+        cpu: "25m"
+      limits:
+        memory: "32Mi"
+        cpu: "50m"

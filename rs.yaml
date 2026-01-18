@@ -17,10 +17,17 @@ spec:
     spec:
       containers:
       - name: nginx-container
-        image: nginx:latest
+        image: nginx:alpine
         ports:
         - containerPort: 80
-  replicas: 4
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+  replicas: 2
   selector:
     matchLabels:
       app: nginx
