@@ -1,8 +1,17 @@
 # 30-Day CKA Master Preparation Guide
-**Cluster:** cka-cluster-1 (Kind cluster)  
+**Cluster:** kind-cka-cluster-1 (Kind cluster)  
 **Daily Time:** 1 hour  
 **Total Duration:** 30 days  
 **Exam Focus:** Hands-on debugging and troubleshooting
+
+---
+
+## Cluster Information
+- **Cluster Name:** kind-cka-cluster-1
+- **API Server:** https://127.0.0.1:49582
+- **Nodes:** cka-cluster-1-control-plane, cka-cluster-1-worker, cka-cluster-1-worker2
+- **Kubernetes Version:** v1.35.0
+- **Existing Namespaces:** default, dev, kube-node-lease, kube-public, kube-system, local-path-storage
 
 ---
 
@@ -10,7 +19,7 @@
 Each day includes:
 - **Task Summary** - What you'll accomplish
 - **Expected Outcome** - Skills gained
-- **Setup Scripts** - Resource creation
+- **Setup Scripts** - Resource creation with daily namespace
 - **Debug Scenarios** - Real exam-like problems
 - **Cleanup Scripts** - Environment reset
 
@@ -39,29 +48,32 @@ Each day includes:
 # Day 1 Setup
 echo "=== Day 1: Cluster Architecture Setup ==="
 
-# Create working directory
+# Create working directory and namespace
 mkdir -p ~/cka-day1 && cd ~/cka-day1
+kubectl create namespace cka-day1 --dry-run=client -o yaml | kubectl apply -f -
 
 # Get cluster info
 kubectl cluster-info > cluster-info.txt
 kubectl get nodes -o wide > nodes-info.txt
 
-# Extract certificates
-kubectl get configmap -n kube-system kube-root-ca.crt -o jsonpath='{.data.ca\.crt}' > ca.crt
+# Extract certificates from your actual cluster
+kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > ca.crt
 kubectl config view --raw -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > client.crt
 
-# Create test namespace
-kubectl create namespace day1-test
-
 echo "Setup complete. Files created in ~/cka-day1/"
+echo "Namespace: cka-day1 created"
 ```
 
 #### Main Tasks
 
 **Task 1.1: Certificate Analysis (15 min)**
 ```bash
+# Get your actual API server endpoint
+API_SERVER=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.server}' | sed 's|https://||' | sed 's|http://||')
+echo "API Server: $API_SERVER"
+
 # Examine API server certificate
-echo | openssl s_client -connect 127.0.0.1:49582 2>/dev/null | openssl x509 -text -noout | grep -A10 "Subject:"
+echo | openssl s_client -connect $API_SERVER 2>/dev/null | openssl x509 -text -noout | grep -A10 "Subject:"
 
 # Check certificate chain
 openssl verify -CAfile ca.crt client.crt
@@ -76,16 +88,19 @@ docker exec -it cka-cluster-1-control-plane find /etc/kubernetes/pki/ -name "*.c
 openssl genrsa -out alice.key 2048
 openssl req -new -key alice.key -out alice.csr -subj "/CN=alice/O=developers"
 
-# Get CA key from kind (exam simulation)
+# Get CA key from your kind cluster
 docker exec -it cka-cluster-1-control-plane cat /etc/kubernetes/pki/ca.key > ca.key
 
 # Sign certificate
 openssl x509 -req -in alice.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out alice.crt -days 30
 
-# Create kubeconfig
-kubectl config set-cluster day1-cluster --server=https://127.0.0.1:49582 --certificate-authority=ca.crt --kubeconfig=alice.kubeconfig
+# Get your actual cluster server URL
+CLUSTER_SERVER=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.server}')
+
+# Create kubeconfig with correct cluster name
+kubectl config set-cluster kind-cka-cluster-1 --server=$CLUSTER_SERVER --certificate-authority=ca.crt --kubeconfig=alice.kubeconfig
 kubectl config set-credentials alice --client-certificate=alice.crt --client-key=alice.key --kubeconfig=alice.kubeconfig
-kubectl config set-context alice-context --cluster=day1-cluster --user=alice --kubeconfig=alice.kubeconfig
+kubectl config set-context alice-context --cluster=kind-cka-cluster-1 --user=alice --namespace=cka-day1 --kubeconfig=alice.kubeconfig
 kubectl config use-context alice-context --kubeconfig=alice.kubeconfig
 ```
 
@@ -124,28 +139,28 @@ openssl req -new -key alice.key -out wrong.csr -subj "/CN=bob/O=developers"
 openssl x509 -req -in wrong.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out wrong.crt -days 30
 
 # Create RBAC for alice (not bob)
-kubectl create role alice-role --verb=get,list --resource=pods -n day1-test
-kubectl create rolebinding alice-binding --role=alice-role --user=alice -n day1-test
+kubectl create role alice-role --verb=get,list --resource=pods -n cka-day1
+kubectl create rolebinding alice-binding --role=alice-role --user=alice -n cka-day1
 
 # Use wrong certificate
 kubectl config set-credentials alice --client-certificate=wrong.crt --client-key=alice.key --kubeconfig=alice.kubeconfig
 
 # Try to access (should fail due to RBAC)
-kubectl --kubeconfig=alice.kubeconfig get pods -n day1-test
+kubectl --kubeconfig=alice.kubeconfig get pods -n cka-day1
 
 # Debug steps:
 # 1. Check certificate subject
 openssl x509 -in wrong.crt -noout -subject
 
 # 2. Check RBAC binding
-kubectl get rolebinding alice-binding -n day1-test -o yaml
+kubectl get rolebinding alice-binding -n cka-day1 -o yaml
 
 # 3. Identify mismatch (cert says bob, RBAC expects alice)
 # 4. Fix by using correct certificate
 kubectl config set-credentials alice --client-certificate=alice.crt --client-key=alice.key --kubeconfig=alice.kubeconfig
 
 # 5. Verify fix
-kubectl --kubeconfig=alice.kubeconfig get pods -n day1-test
+kubectl --kubeconfig=alice.kubeconfig get pods -n cka-day1
 ```
 
 #### Cleanup Script
@@ -154,14 +169,11 @@ kubectl --kubeconfig=alice.kubeconfig get pods -n day1-test
 # Day 1 Cleanup
 echo "=== Day 1 Cleanup ==="
 
-# Remove test namespace
-kubectl delete namespace day1-test
+# Remove namespace and all resources
+kubectl delete namespace cka-day1
 
 # Remove working directory
 rm -rf ~/cka-day1
-
-# Remove temporary files
-rm -f ca.key alice.* wrong.* *.csr *.srl
 
 echo "Day 1 cleanup complete"
 ```
@@ -190,10 +202,37 @@ echo "Day 1 cleanup complete"
 echo "=== Day 2: RBAC & Security Setup ==="
 
 mkdir -p ~/cka-day2 && cd ~/cka-day2
+kubectl create namespace cka-day2 --dry-run=client -o yaml | kubectl apply -f -
+
+# Create test users certificates
+openssl genrsa -out developer.key 2048
+openssl req -new -key developer.key -out developer.csr -subj "/CN=developer/O=dev-team"
+
+openssl genrsa -out admin.key 2048
+openssl req -new -key admin.key -out admin.csr -subj "/CN=admin/O=admin-team"
+
+# Get CA files from your cluster
+kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > ca.crt
+docker exec -it cka-cluster-1-control-plane cat /etc/kubernetes/pki/ca.key > ca.key
+
+# Sign certificates
+openssl x509 -req -in developer.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out developer.crt -days 30
+openssl x509 -req -in admin.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out admin.crt -days 30
+
+echo "Setup complete. Ready for RBAC tasks."
+```
+
+#### Setup Script
+```bash
+#!/bin/bash
+# Day 2 Setup
+echo "=== Day 2: RBAC & Security Setup ==="
+
+mkdir -p ~/cka-day2 && cd ~/cka-day2
 
 # Create test namespaces
-kubectl create namespace rbac-test
-kubectl create namespace security-test
+kubectl create namespace cka-day2
+kubectl create namespace cka-day2
 
 # Create test users certificates
 openssl genrsa -out developer.key 2048
@@ -237,7 +276,7 @@ cat <<EOF | kubectl apply -f -
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  namespace: rbac-test
+  namespace: cka-day2
   name: developer-role
 rules:
 - apiGroups: [""]
@@ -250,17 +289,17 @@ EOF
 
 # Create bindings
 kubectl create clusterrolebinding admin-binding --clusterrole=admin-role --user=admin
-kubectl create rolebinding developer-binding --role=developer-role --user=developer -n rbac-test
+kubectl create rolebinding developer-binding --role=developer-role --user=developer -n cka-day2
 
 # Create kubeconfigs
-kubectl config set-cluster test-cluster --server=https://127.0.0.1:49582 --certificate-authority=ca.crt --kubeconfig=developer.kubeconfig
+kubectl config set-cluster kind-cka-cluster-1 --server=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.server}') --certificate-authority=ca.crt --kubeconfig=developer.kubeconfig
 kubectl config set-credentials developer --client-certificate=developer.crt --client-key=developer.key --kubeconfig=developer.kubeconfig
-kubectl config set-context developer-context --cluster=test-cluster --user=developer --namespace=rbac-test --kubeconfig=developer.kubeconfig
+kubectl config set-context developer-context --cluster=kind-cka-cluster-1 --user=developer --namespace=cka-day2 --kubeconfig=developer.kubeconfig
 kubectl config use-context developer-context --kubeconfig=developer.kubeconfig
 
-kubectl config set-cluster test-cluster --server=https://127.0.0.1:49582 --certificate-authority=ca.crt --kubeconfig=admin.kubeconfig
+kubectl config set-cluster kind-cka-cluster-1 --server=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.server}') --certificate-authority=ca.crt --kubeconfig=admin.kubeconfig
 kubectl config set-credentials admin --client-certificate=admin.crt --client-key=admin.key --kubeconfig=admin.kubeconfig
-kubectl config set-context admin-context --cluster=test-cluster --user=admin --kubeconfig=admin.kubeconfig
+kubectl config set-context admin-context --cluster=kind-cka-cluster-1 --user=admin --kubeconfig=admin.kubeconfig
 kubectl config use-context admin-context --kubeconfig=admin.kubeconfig
 ```
 
@@ -272,7 +311,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: secure-pod
-  namespace: security-test
+  namespace: cka-day2
 spec:
   securityContext:
     runAsUser: 1000
@@ -301,13 +340,13 @@ spec:
 EOF
 
 # Create service account with limited permissions
-kubectl create serviceaccount limited-sa -n security-test
+kubectl create serviceaccount limited-sa -n cka-day2
 
 cat <<EOF | kubectl apply -f -
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  namespace: security-test
+  namespace: cka-day2
   name: limited-role
 rules:
 - apiGroups: [""]
@@ -315,7 +354,7 @@ rules:
   verbs: ["get", "list"]
 EOF
 
-kubectl create rolebinding limited-binding --role=limited-role --serviceaccount=security-test:limited-sa -n security-test
+kubectl create rolebinding limited-binding --role=limited-role --serviceaccount=cka-day2:limited-sa -n cka-day2
 ```
 
 #### Debug Scenarios
@@ -326,28 +365,28 @@ kubectl create rolebinding limited-binding --role=limited-role --serviceaccount=
 echo "=== Testing developer permissions ==="
 
 # Should work
-kubectl --kubeconfig=developer.kubeconfig get pods -n rbac-test
-kubectl --kubeconfig=developer.kubeconfig create deployment test-deploy --image=nginx -n rbac-test
+kubectl --kubeconfig=developer.kubeconfig get pods -n cka-day2
+kubectl --kubeconfig=developer.kubeconfig create deployment test-deploy --image=nginx -n cka-day2
 
 # Should fail - wrong namespace
 kubectl --kubeconfig=developer.kubeconfig get pods -n default
 
 # Should fail - no permission for secrets
-kubectl --kubeconfig=developer.kubeconfig get secrets -n rbac-test
+kubectl --kubeconfig=developer.kubeconfig get secrets -n cka-day2
 
 # Debug steps:
 echo "Debugging permission issues..."
 
 # 1. Check what user can do
-kubectl --kubeconfig=developer.kubeconfig auth can-i get pods -n rbac-test
-kubectl --kubeconfig=developer.kubeconfig auth can-i get secrets -n rbac-test
+kubectl --kubeconfig=developer.kubeconfig auth can-i get pods -n cka-day2
+kubectl --kubeconfig=developer.kubeconfig auth can-i get secrets -n cka-day2
 kubectl --kubeconfig=developer.kubeconfig auth can-i get pods -n default
 
 # 2. Check role bindings
-kubectl get rolebinding developer-binding -n rbac-test -o yaml
+kubectl get rolebinding developer-binding -n cka-day2 -o yaml
 
 # 3. Check role permissions
-kubectl get role developer-role -n rbac-test -o yaml
+kubectl get role developer-role -n cka-day2 -o yaml
 ```
 
 **Debug 2.2: Security Context Failures (5 min)**
@@ -358,7 +397,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: insecure-pod
-  namespace: security-test
+  namespace: cka-day2
 spec:
   containers:
   - name: insecure-container
@@ -369,11 +408,11 @@ spec:
 EOF
 
 # Check pod status
-kubectl get pod insecure-pod -n security-test
-kubectl describe pod insecure-pod -n security-test
+kubectl get pod insecure-pod -n cka-day2
+kubectl describe pod insecure-pod -n cka-day2
 
 # Debug: Compare with secure pod
-kubectl get pod secure-pod -n security-test -o yaml | grep -A20 securityContext
+kubectl get pod secure-pod -n cka-day2 -o yaml | grep -A20 securityContext
 ```
 
 #### Cleanup Script
@@ -383,8 +422,8 @@ kubectl get pod secure-pod -n security-test -o yaml | grep -A20 securityContext
 echo "=== Day 2 Cleanup ==="
 
 # Remove namespaces
-kubectl delete namespace rbac-test
-kubectl delete namespace security-test
+kubectl delete namespace cka-day2
+kubectl delete namespace cka-day2
 
 # Remove cluster resources
 kubectl delete clusterrole admin-role
@@ -423,7 +462,7 @@ echo "=== Day 3: Pod Lifecycle Setup ==="
 mkdir -p ~/cka-day3 && cd ~/cka-day3
 
 # Create test namespace
-kubectl create namespace pod-test
+kubectl create namespace cka-day3
 
 # Create resource quota
 cat <<EOF | kubectl apply -f -
@@ -431,7 +470,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: pod-quota
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   hard:
     requests.cpu: "2"
@@ -447,7 +486,7 @@ apiVersion: v1
 kind: LimitRange
 metadata:
   name: pod-limits
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   limits:
   - default:
@@ -472,7 +511,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: working-pod
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   containers:
   - name: app
@@ -494,7 +533,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: image-pull-error
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   containers:
   - name: app
@@ -510,7 +549,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: resource-exceeded
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   containers:
   - name: app
@@ -526,7 +565,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: crash-loop
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   containers:
   - name: app
@@ -547,7 +586,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: init-pod
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   initContainers:
   - name: init-service
@@ -568,7 +607,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: multi-container
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   containers:
   - name: web
@@ -600,7 +639,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: probe-pod
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   containers:
   - name: app
@@ -633,29 +672,29 @@ EOF
 echo "=== Debugging Pod Issues ==="
 
 # Check all pod statuses
-kubectl get pods -n pod-test
+kubectl get pods -n cka-day3
 
 # Debug image pull error
 echo "--- Image Pull Error ---"
-kubectl describe pod image-pull-error -n pod-test
-kubectl get events -n pod-test --field-selector involvedObject.name=image-pull-error
+kubectl describe pod image-pull-error -n cka-day3
+kubectl get events -n cka-day3 --field-selector involvedObject.name=image-pull-error
 
 # Debug resource exceeded
 echo "--- Resource Exceeded ---"
-kubectl describe pod resource-exceeded -n pod-test
-kubectl get resourcequota pod-quota -n pod-test
+kubectl describe pod resource-exceeded -n cka-day3
+kubectl get resourcequota pod-quota -n cka-day3
 
 # Debug crash loop
 echo "--- Crash Loop ---"
-kubectl describe pod crash-loop -n pod-test
-kubectl logs crash-loop -n pod-test --previous
+kubectl describe pod crash-loop -n cka-day3
+kubectl logs crash-loop -n cka-day3 --previous
 
 # Fix the issues:
 # 1. Fix image pull error
-kubectl patch pod image-pull-error -n pod-test -p '{"spec":{"containers":[{"name":"app","image":"nginx:1.20"}]}}'
+kubectl patch pod image-pull-error -n cka-day3 -p '{"spec":{"containers":[{"name":"app","image":"nginx:1.20"}]}}'
 
 # 2. Fix resource issue by updating quota or reducing requests
-kubectl patch resourcequota pod-quota -n pod-test -p '{"spec":{"hard":{"requests.cpu":"5","requests.memory":"5Gi"}}}'
+kubectl patch resourcequota pod-quota -n cka-day3 -p '{"spec":{"hard":{"requests.cpu":"5","requests.memory":"5Gi"}}}'
 
 # 3. Fix crash loop
 cat <<EOF | kubectl apply -f -
@@ -663,7 +702,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: crash-loop-fixed
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   containers:
   - name: app
@@ -678,10 +717,10 @@ EOF
 **Debug 3.2: Networking and Connectivity (5 min)**
 ```bash
 # Test pod networking
-kubectl exec -it working-pod -n pod-test -- curl localhost
+kubectl exec -it working-pod -n cka-day3 -- curl localhost
 
 # Test inter-pod communication
-kubectl get pods -n pod-test -o wide
+kubectl get pods -n cka-day3 -o wide
 
 # Create test pod for network debugging
 cat <<EOF | kubectl apply -f -
@@ -689,7 +728,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: network-test
-  namespace: pod-test
+  namespace: cka-day3
 spec:
   containers:
   - name: test
@@ -702,11 +741,11 @@ spec:
 EOF
 
 # Test DNS resolution
-kubectl exec -it network-test -n pod-test -- nslookup kubernetes.default.svc.cluster.local
+kubectl exec -it network-test -n cka-day3 -- nslookup kubernetes.default.svc.cluster.local
 
 # Test connectivity to other pod
-WORKING_POD_IP=$(kubectl get pod working-pod -n pod-test -o jsonpath='{.status.podIP}')
-kubectl exec -it network-test -n pod-test -- wget -qO- http://$WORKING_POD_IP
+WORKING_POD_IP=$(kubectl get pod working-pod -n cka-day3 -o jsonpath='{.status.podIP}')
+kubectl exec -it network-test -n cka-day3 -- wget -qO- http://$WORKING_POD_IP
 ```
 
 #### Cleanup Script
@@ -716,7 +755,7 @@ kubectl exec -it network-test -n pod-test -- wget -qO- http://$WORKING_POD_IP
 echo "=== Day 3 Cleanup ==="
 
 # Remove namespace (removes all pods and resources)
-kubectl delete namespace pod-test
+kubectl delete namespace cka-day3
 
 # Remove working directory
 rm -rf ~/cka-day3
@@ -760,7 +799,7 @@ echo "=== Day 4: Services & Networking Setup ==="
 mkdir -p ~/cka-day4 && cd ~/cka-day4
 
 # Create test namespace
-kubectl create namespace service-test
+kubectl create namespace cka-day4
 
 # Create backend pods
 cat <<EOF | kubectl apply -f -
@@ -768,7 +807,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend-app
-  namespace: service-test
+  namespace: cka-day4
 spec:
   replicas: 3
   selector:
@@ -806,7 +845,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: backend-clusterip
-  namespace: service-test
+  namespace: cka-day4
 spec:
   selector:
     app: backend
@@ -822,7 +861,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: backend-nodeport
-  namespace: service-test
+  namespace: cka-day4
 spec:
   selector:
     app: backend
@@ -839,7 +878,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: backend-headless
-  namespace: service-test
+  namespace: cka-day4
 spec:
   selector:
     app: backend
@@ -855,7 +894,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: backend-broken
-  namespace: service-test
+  namespace: cka-day4
 spec:
   selector:
     app: wrong-label
@@ -870,7 +909,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: external-service
-  namespace: service-test
+  namespace: cka-day4
 spec:
   type: ExternalName
   externalName: google.com
@@ -887,7 +926,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: manual-service
-  namespace: service-test
+  namespace: cka-day4
 spec:
   ports:
   - port: 80
@@ -900,7 +939,7 @@ apiVersion: v1
 kind: Endpoints
 metadata:
   name: manual-service
-  namespace: service-test
+  namespace: cka-day4
 subsets:
 - addresses:
   - ip: 8.8.8.8
@@ -914,7 +953,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: test-client
-  namespace: service-test
+  namespace: cka-day4
 spec:
   containers:
   - name: client
@@ -930,41 +969,41 @@ EOF
 echo "=== Debugging Service Issues ==="
 
 # Check service status
-kubectl get svc -n service-test
-kubectl get endpoints -n service-test
+kubectl get svc -n cka-day4
+kubectl get endpoints -n cka-day4
 
 # Test working service
-kubectl exec -it test-client -n service-test -- wget -qO- backend-clusterip
+kubectl exec -it test-client -n cka-day4 -- wget -qO- backend-clusterip
 
 # Test broken service (should fail)
-kubectl exec -it test-client -n service-test -- wget -qO- backend-broken
+kubectl exec -it test-client -n cka-day4 -- wget -qO- backend-broken
 
 # Debug broken service
 echo "--- Debugging broken service ---"
-kubectl describe svc backend-broken -n service-test
-kubectl get endpoints backend-broken -n service-test
+kubectl describe svc backend-broken -n cka-day4
+kubectl get endpoints backend-broken -n cka-day4
 
 # Check pod labels
-kubectl get pods -n service-test --show-labels
+kubectl get pods -n cka-day4 --show-labels
 
 # Fix broken service
-kubectl patch svc backend-broken -n service-test -p '{"spec":{"selector":{"app":"backend"}}}'
+kubectl patch svc backend-broken -n cka-day4 -p '{"spec":{"selector":{"app":"backend"}}}'
 
 # Verify fix
-kubectl get endpoints backend-broken -n service-test
-kubectl exec -it test-client -n service-test -- wget -qO- backend-broken
+kubectl get endpoints backend-broken -n cka-day4
+kubectl exec -it test-client -n cka-day4 -- wget -qO- backend-broken
 ```
 
 **Debug 4.2: DNS Resolution Problems (5 min)**
 ```bash
 # Test DNS resolution
-kubectl exec -it test-client -n service-test -- nslookup backend-clusterip
+kubectl exec -it test-client -n cka-day4 -- nslookup backend-clusterip
 
 # Test cross-namespace DNS
-kubectl exec -it test-client -n service-test -- nslookup kubernetes.default.svc.cluster.local
+kubectl exec -it test-client -n cka-day4 -- nslookup kubernetes.default.svc.cluster.local
 
 # Test headless service DNS
-kubectl exec -it test-client -n service-test -- nslookup backend-headless
+kubectl exec -it test-client -n cka-day4 -- nslookup backend-headless
 
 # Debug DNS issues
 kubectl get pods -n kube-system -l k8s-app=kube-dns
@@ -977,7 +1016,7 @@ kubectl logs -n kube-system -l k8s-app=kube-dns
 # Day 4 Cleanup
 echo "=== Day 4 Cleanup ==="
 
-kubectl delete namespace service-test
+kubectl delete namespace cka-day4
 rm -rf ~/cka-day4
 
 echo "Day 4 cleanup complete"
@@ -1009,7 +1048,7 @@ echo "=== Day 5: Storage Setup ==="
 mkdir -p ~/cka-day5 && cd ~/cka-day5
 
 # Create test namespace
-kubectl create namespace storage-test
+kubectl create namespace cka-day5
 
 # Create directories on kind nodes for hostPath volumes
 docker exec -it cka-cluster-1-control-plane mkdir -p /tmp/pv-data
@@ -1045,7 +1084,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: pvc-test
-  namespace: storage-test
+  namespace: cka-day5
 spec:
   accessModes:
   - ReadWriteOnce
@@ -1060,7 +1099,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: storage-pod
-  namespace: storage-test
+  namespace: cka-day5
 spec:
   containers:
   - name: app
@@ -1080,7 +1119,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: pvc-large
-  namespace: storage-test
+  namespace: cka-day5
 spec:
   accessModes:
   - ReadWriteOnce
@@ -1130,7 +1169,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: pvc-fast
-  namespace: storage-test
+  namespace: cka-day5
 spec:
   accessModes:
   - ReadWriteOnce
@@ -1146,7 +1185,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: web-storage
-  namespace: storage-test
+  namespace: cka-day5
 spec:
   serviceName: web-storage
   replicas: 2
@@ -1184,13 +1223,13 @@ echo "=== Debugging Storage Issues ==="
 
 # Check PV/PVC status
 kubectl get pv
-kubectl get pvc -n storage-test
+kubectl get pvc -n cka-day5
 
 # Debug unbound PVC
-kubectl describe pvc pvc-large -n storage-test
+kubectl describe pvc pvc-large -n cka-day5
 
 # Check events
-kubectl get events -n storage-test --field-selector reason=FailedBinding
+kubectl get events -n cka-day5 --field-selector reason=FailedBinding
 
 # Fix by creating appropriate PV
 cat <<EOF | kubectl apply -f -
@@ -1209,20 +1248,20 @@ spec:
 EOF
 
 # Verify binding
-kubectl get pvc pvc-large -n storage-test
+kubectl get pvc pvc-large -n cka-day5
 ```
 
 **Debug 5.2: Mount Issues (5 min)**
 ```bash
 # Check pod with storage
-kubectl get pod storage-pod -n storage-test
-kubectl describe pod storage-pod -n storage-test
+kubectl get pod storage-pod -n cka-day5
+kubectl describe pod storage-pod -n cka-day5
 
 # Test writing to mounted volume
-kubectl exec -it storage-pod -n storage-test -- sh -c "echo 'Hello from PV' > /usr/share/nginx/html/index.html"
+kubectl exec -it storage-pod -n cka-day5 -- sh -c "echo 'Hello from PV' > /usr/share/nginx/html/index.html"
 
 # Verify data persistence
-kubectl exec -it storage-pod -n storage-test -- cat /usr/share/nginx/html/index.html
+kubectl exec -it storage-pod -n cka-day5 -- cat /usr/share/nginx/html/index.html
 
 # Check on host
 docker exec -it cka-cluster-1-control-plane ls -la /tmp/pv-data/
@@ -1234,7 +1273,7 @@ docker exec -it cka-cluster-1-control-plane ls -la /tmp/pv-data/
 # Day 5 Cleanup
 echo "=== Day 5 Cleanup ==="
 
-kubectl delete namespace storage-test
+kubectl delete namespace cka-day5
 kubectl delete pv --all
 kubectl delete storageclass fast-storage
 
@@ -1274,7 +1313,7 @@ echo "=== Day 6: ConfigMaps & Secrets Setup ==="
 mkdir -p ~/cka-day6 && cd ~/cka-day6
 
 # Create test namespace
-kubectl create namespace config-test
+kubectl create namespace cka-day6
 
 # Create sample config files
 cat > app.properties << EOF
@@ -1308,17 +1347,17 @@ kubectl create configmap app-config \
   --from-literal=database.host=postgres \
   --from-literal=database.port=5432 \
   --from-literal=log.level=DEBUG \
-  -n config-test
+  -n cka-day6
 
 # Create ConfigMap from file
 kubectl create configmap app-properties \
   --from-file=app.properties \
-  -n config-test
+  -n cka-day6
 
 # Create ConfigMap from directory
 kubectl create configmap nginx-config \
   --from-file=nginx.conf \
-  -n config-test
+  -n cka-day6
 
 # Create ConfigMap using YAML
 cat <<EOF | kubectl apply -f -
@@ -1326,7 +1365,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: multi-config
-  namespace: config-test
+  namespace: cka-day6
 data:
   database.yaml: |
     host: mysql
@@ -1344,7 +1383,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: config-env-pod
-  namespace: config-test
+  namespace: cka-day6
 spec:
   containers:
   - name: app
@@ -1372,7 +1411,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: config-volume-pod
-  namespace: config-test
+  namespace: cka-day6
 spec:
   containers:
   - name: nginx
@@ -1398,7 +1437,7 @@ EOF
 kubectl create secret generic db-secret \
   --from-literal=username=admin \
   --from-literal=password=secretpassword \
-  -n config-test
+  -n cka-day6
 
 # Create Secret from files
 echo -n 'admin' > username.txt
@@ -1406,7 +1445,7 @@ echo -n 'supersecret' > password.txt
 kubectl create secret generic file-secret \
   --from-file=username.txt \
   --from-file=password.txt \
-  -n config-test
+  -n cka-day6
 
 # Create TLS Secret
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
@@ -1416,7 +1455,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 kubectl create secret tls tls-secret \
   --cert=tls.crt \
   --key=tls.key \
-  -n config-test
+  -n cka-day6
 
 # Create Docker registry secret
 kubectl create secret docker-registry regcred \
@@ -1424,7 +1463,7 @@ kubectl create secret docker-registry regcred \
   --docker-username=myuser \
   --docker-password=mypassword \
   --docker-email=myemail@example.com \
-  -n config-test
+  -n cka-day6
 
 # Pod using Secrets
 cat <<EOF | kubectl apply -f -
@@ -1432,7 +1471,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: secret-pod
-  namespace: config-test
+  namespace: cka-day6
 spec:
   containers:
   - name: app
@@ -1474,7 +1513,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: broken-config-pod
-  namespace: config-test
+  namespace: cka-day6
 spec:
   containers:
   - name: app
@@ -1489,22 +1528,22 @@ spec:
 EOF
 
 # Check pod status
-kubectl get pod broken-config-pod -n config-test
-kubectl describe pod broken-config-pod -n config-test
+kubectl get pod broken-config-pod -n cka-day6
+kubectl describe pod broken-config-pod -n cka-day6
 
 # Fix by creating the ConfigMap
 kubectl create configmap nonexistent-config \
   --from-literal=some.key=some.value \
-  -n config-test
+  -n cka-day6
 
 # Delete and recreate pod
-kubectl delete pod broken-config-pod -n config-test
+kubectl delete pod broken-config-pod -n cka-day6
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
   name: fixed-config-pod
-  namespace: config-test
+  namespace: cka-day6
 spec:
   containers:
   - name: app
@@ -1519,24 +1558,24 @@ spec:
 EOF
 
 # Verify fix
-kubectl exec -it fixed-config-pod -n config-test -- env | grep MISSING_CONFIG
+kubectl exec -it fixed-config-pod -n cka-day6 -- env | grep MISSING_CONFIG
 ```
 
 **Debug 6.2: Secret Access Issues (5 min)**
 ```bash
 # Test secret access
-kubectl exec -it secret-pod -n config-test -- env | grep DB_
+kubectl exec -it secret-pod -n cka-day6 -- env | grep DB_
 
 # Check mounted secrets
-kubectl exec -it secret-pod -n config-test -- ls -la /etc/secrets/
-kubectl exec -it secret-pod -n config-test -- cat /etc/secrets/username.txt
+kubectl exec -it secret-pod -n cka-day6 -- ls -la /etc/secrets/
+kubectl exec -it secret-pod -n cka-day6 -- cat /etc/secrets/username.txt
 
 # Verify ConfigMap and Secret updates
-kubectl patch configmap app-config -n config-test -p '{"data":{"new.key":"new.value"}}'
-kubectl patch secret db-secret -n config-test -p '{"data":{"newkey":"bmV3dmFsdWU="}}'
+kubectl patch configmap app-config -n cka-day6 -p '{"data":{"new.key":"new.value"}}'
+kubectl patch secret db-secret -n cka-day6 -p '{"data":{"newkey":"bmV3dmFsdWU="}}'
 
 # Check if pod sees updates (may need restart for env vars)
-kubectl exec -it config-env-pod -n config-test -- env | grep -E "(DB_|new)"
+kubectl exec -it config-env-pod -n cka-day6 -- env | grep -E "(DB_|new)"
 ```
 
 #### Cleanup Script
@@ -1545,7 +1584,7 @@ kubectl exec -it config-env-pod -n config-test -- env | grep -E "(DB_|new)"
 # Day 6 Cleanup
 echo "=== Day 6 Cleanup ==="
 
-kubectl delete namespace config-test
+kubectl delete namespace cka-day6
 rm -rf ~/cka-day6
 rm -f username.txt password.txt tls.key tls.crt
 
@@ -1578,7 +1617,7 @@ echo "=== Day 7: Integration Review Setup ==="
 mkdir -p ~/cka-day7 && cd ~/cka-day7
 
 # Create integration namespace
-kubectl create namespace integration-test
+kubectl create namespace cka-day7
 
 echo "Setup complete. Ready for integration tasks."
 ```
@@ -1591,7 +1630,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-config
-  namespace: integration-test
+  namespace: cka-day7
 data:
   database.host: "postgres-service"
   database.port: "5432"
@@ -1604,7 +1643,7 @@ EOF
 kubectl create secret generic db-credentials \
   --from-literal=username=appuser \
   --from-literal=password=apppass123 \
-  -n integration-test
+  -n cka-day7
 
 # Create PostgreSQL deployment
 cat <<EOF | kubectl apply -f -
@@ -1612,7 +1651,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres
-  namespace: integration-test
+  namespace: cka-day7
 spec:
   replicas: 1
   selector:
@@ -1649,7 +1688,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres-service
-  namespace: integration-test
+  namespace: cka-day7
 spec:
   selector:
     app: postgres
@@ -1664,7 +1703,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redis
-  namespace: integration-test
+  namespace: cka-day7
 spec:
   replicas: 1
   selector:
@@ -1685,7 +1724,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: redis-service
-  namespace: integration-test
+  namespace: cka-day7
 spec:
   selector:
     app: redis
@@ -1700,7 +1739,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: web-app
-  namespace: integration-test
+  namespace: cka-day7
 spec:
   replicas: 3
   selector:
@@ -1756,7 +1795,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: web-app-service
-  namespace: integration-test
+  namespace: cka-day7
 spec:
   selector:
     app: web-app
@@ -1767,13 +1806,13 @@ spec:
 EOF
 
 # Create RBAC for application
-kubectl create serviceaccount app-sa -n integration-test
+kubectl create serviceaccount app-sa -n cka-day7
 
 cat <<EOF | kubectl apply -f -
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  namespace: integration-test
+  namespace: cka-day7
   name: app-role
 rules:
 - apiGroups: [""]
@@ -1786,8 +1825,8 @@ EOF
 
 kubectl create rolebinding app-binding \
   --role=app-role \
-  --serviceaccount=integration-test:app-sa \
-  -n integration-test
+  --serviceaccount=cka-day7:app-sa \
+  -n cka-day7
 ```
 
 #### Complex Debug Scenario (15 min)
@@ -1796,43 +1835,43 @@ echo "=== Complex Integration Debugging ==="
 
 # Introduce multiple issues
 # 1. Wrong service selector
-kubectl patch service postgres-service -n integration-test -p '{"spec":{"selector":{"app":"wrong-postgres"}}}'
+kubectl patch service postgres-service -n cka-day7 -p '{"spec":{"selector":{"app":"wrong-postgres"}}}'
 
 # 2. Missing secret key
-kubectl patch deployment web-app -n integration-test -p '{"spec":{"template":{"spec":{"containers":[{"name":"app","env":[{"name":"MISSING_SECRET","valueFrom":{"secretKeyRef":{"name":"db-credentials","key":"nonexistent"}}}]}]}}}}'
+kubectl patch deployment web-app -n cka-day7 -p '{"spec":{"template":{"spec":{"containers":[{"name":"app","env":[{"name":"MISSING_SECRET","valueFrom":{"secretKeyRef":{"name":"db-credentials","key":"nonexistent"}}}]}]}}}}'
 
 # 3. Resource constraints
-kubectl patch deployment web-app -n integration-test -p '{"spec":{"template":{"spec":{"containers":[{"name":"app","resources":{"requests":{"cpu":"2","memory":"4Gi"}}}]}}}}'
+kubectl patch deployment web-app -n cka-day7 -p '{"spec":{"template":{"spec":{"containers":[{"name":"app","resources":{"requests":{"cpu":"2","memory":"4Gi"}}}]}}}}'
 
 # Debug process
 echo "--- Checking application status ---"
-kubectl get pods -n integration-test
-kubectl get svc -n integration-test
-kubectl get endpoints -n integration-test
+kubectl get pods -n cka-day7
+kubectl get svc -n cka-day7
+kubectl get endpoints -n cka-day7
 
 echo "--- Debugging service connectivity ---"
-kubectl describe svc postgres-service -n integration-test
-kubectl get endpoints postgres-service -n integration-test
+kubectl describe svc postgres-service -n cka-day7
+kubectl get endpoints postgres-service -n cka-day7
 
 echo "--- Debugging pod issues ---"
-kubectl describe deployment web-app -n integration-test
-kubectl get events -n integration-test --sort-by='.lastTimestamp'
+kubectl describe deployment web-app -n cka-day7
+kubectl get events -n cka-day7 --sort-by='.lastTimestamp'
 
 # Fix the issues
 echo "--- Fixing issues ---"
 # Fix service selector
-kubectl patch service postgres-service -n integration-test -p '{"spec":{"selector":{"app":"postgres"}}}'
+kubectl patch service postgres-service -n cka-day7 -p '{"spec":{"selector":{"app":"postgres"}}}'
 
 # Remove problematic env var
-kubectl patch deployment web-app -n integration-test --type='json' -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/env/3"}]'
+kubectl patch deployment web-app -n cka-day7 --type='json' -p='[{"op": "remove", "path": "/spec/template/spec/containers/0/env/3"}]'
 
 # Fix resource constraints
-kubectl patch deployment web-app -n integration-test -p '{"spec":{"template":{"spec":{"containers":[{"name":"app","resources":{"requests":{"cpu":"100m","memory":"128Mi"}}}]}}}}'
+kubectl patch deployment web-app -n cka-day7 -p '{"spec":{"template":{"spec":{"containers":[{"name":"app","resources":{"requests":{"cpu":"100m","memory":"128Mi"}}}]}}}}'
 
 # Verify fixes
 echo "--- Verifying fixes ---"
-kubectl get pods -n integration-test
-kubectl get endpoints -n integration-test
+kubectl get pods -n cka-day7
+kubectl get endpoints -n cka-day7
 ```
 
 #### Cleanup Script
@@ -1841,7 +1880,7 @@ kubectl get endpoints -n integration-test
 # Day 7 Cleanup
 echo "=== Day 7 Cleanup ==="
 
-kubectl delete namespace integration-test
+kubectl delete namespace cka-day7
 rm -rf ~/cka-day7
 
 echo "Week 1 complete! Ready for Week 2."
